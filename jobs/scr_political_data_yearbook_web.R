@@ -129,6 +129,7 @@ pdy_country_article_links <- map2_df(
     )
   )
 
+View(pdy_country_article_links)
 
 # any no URL?
 pdy_country_article_links %>% 
@@ -141,10 +142,10 @@ pdy_existing <- list.files(file.path("webdata")) %>%
   tidyr::extract(value, c("country", "data_year"), regex = "([a-z_]+)_(\\d{4}).+", convert = TRUE) %>% 
   mutate(country = str_to_title(gsub("_", " ", country))) 
 
-# read and save article content
-pdy_articles <- pdy_country_article_links %>% 
+# read and save article content -----
+pdy_articles2 <- pdy_country_article_links %>% 
   filter(!is.na(source_url)) %>% 
-  filter(data_year > 2009) %>%
+  filter(data_year > 1999) %>%
   # # do not get daat for year books that have already been downloaded
   # anti_join(pdy_existing) %>% 
   filter(country %in% countries$country_name) %>% 
@@ -158,7 +159,10 @@ pdy_articles <- pdy_country_article_links %>%
     ){
       
       out <- tibble(
-        source_url = source_url
+        country = country
+        , publish_year = publish_year
+        , data_year = data_year
+        , source_url = source_url
         , doi = NA_character_
         , title = NA_character_
         , authors = vector("list", 1L)
@@ -237,65 +241,79 @@ pdy_articles <- pdy_country_article_links %>%
 
 write_rds(pdy_articles, file.path("data", "pdy_articles.RData"))
 
-write_csv(pdy_articles[-4], file.path("data", "pdy_articles.csv"))
+write_csv(pdy_articles[-7], file.path("data", "pdy_articles.csv"))
 
+all_files <- list.files("webdata", full.names = T, pattern = "*.html")
 
-pdy_article_content <- list.files("webdata", full.names = T, pattern = "*.html") %>% 
-  map_df(function(file.path) {
-    # read from disk
-    read_html(file.path, encoding = "UTF-8") %>% 
-      # get (sub)sections
-      html_nodes(xpath = paste0("//div[@class='article-section__", c("sub-content']", "content']"), collapse = "|")) %>% 
-      map_df(function(node){
-        tibble(
-          # get section header
-          section = html_node(node, css = "[class^=article-section]") %>%
-            html_text() %>%
-            trimws()
-          # get section content
-          , text = html_nodes(node, "p") %>% 
-            # note: string conversion automatically gets rid of all html tags 
-            # (and converts them to plain-style text)
-            html_text() %>% 
-            gsub(x = ., pattern = "\\n", replacement = "<newpar>") %>% 
-            paste(collapse = " ") %>% 
-            trimws()
-        )
-      }) %>% 
-      # numerate sections
-      mutate(section_nr = row_number()) %>% 
-      # split sections by paragraph into separate rows
-      separate_rows(text, sep = "<newpar>") %>% 
-      mutate_at(vars(text), trimws) %>% 
-      # numerate paragraphs
-      group_by(section) %>% 
-      mutate(paragraph_nr = row_number()) %>% 
-      # split paragraphs by sentences into separate rows
-      # separate_rows(text, sep = "(?<=[.!?])\\s+(?=[A-Z0-9])") %>% 
-      separate_rows(text, sep = "(?<=[.!?])\\s+(?=[A-Z])") %>% 
-      filter(text != "") %>% 
-      # numerate sentences within rows
-      group_by(section) %>% 
-      mutate(sentence_nr = row_number()) %>% 
-      ungroup() %>% 
-      mutate(
-        doc_id = gsub(".+/([a-z_]+)_(\\d{4})\\.[a-z]+$", "\\1_\\2", file.path)
-        , country = stringr::str_to_title(gsub("_", " ", sub("( \\d{4})$", "", doc_id)))
-        , data_year = stringr::str_to_title(sub(".+(\\d{4})$", "\\1", doc_id))
-      ) %>% 
-      select(
-        doc_id
-        , section_nr
-        , section
-        , paragraph_nr
-        , sentence_nr
-        , sentence = text
-        , country
-        , data_year
+# parse section, paragraph, and sentences from documents ---- 
+pdy_article_content <- map_df(all_files, function(file.path) {
+  message("\r", basename(file.path), appendLF = FALSE)
+  # read from disk
+  raw <- read_html(file.path, encoding = "UTF-8")
+  
+  temp_ <- paste0("//%s[@class='article-section__", c("sub-content']", "content']"), collapse = "|")
+  
+  # get (sub)sections
+  secs <- html_nodes(raw, xpath = sprintf(temp_, "section", "section"))
+  if (length(secs) == 0)
+    secs <- html_nodes(raw, xpath = sprintf(temp_, "div", "div"))
+  
+  if (length(secs) == 0){
+    warning("Cannot get sections from ", file.path)
+    return(tibble())
+  }
+    
+  secs %>% 
+    map_df(function(node){
+      tibble(
+        # get section header
+        section = html_node(node, css = "[class^=article-section]") %>%
+          html_text() %>%
+          trimws()
+        # get section content
+        , text = html_nodes(node, "p") %>% 
+          # note: string conversion automatically gets rid of all html tags 
+          # (and converts them to plain-style text)
+          html_text() %>% 
+          gsub(x = ., pattern = "\\n", replacement = "<newpar>") %>% 
+          paste(collapse = " ") %>% 
+          trimws()
       )
-  }) %>% 
+    }) %>% 
+    filter(text!="") %>% 
+    # numerate sections
+    mutate(section_nr = row_number()) %>% 
+    # split sections by paragraph into separate rows
+    separate_rows(text, sep = "<newpar>") %>% 
+    mutate_at(vars(text), trimws) %>% 
+    # numerate paragraphs
+    group_by(section) %>% 
+    mutate(paragraph_nr = row_number()) %>% 
+    # split paragraphs by sentences into separate rows
+    # separate_rows(text, sep = "(?<=[.!?])\\s+(?=[A-Z0-9])") %>% 
+    separate_rows(text, sep = "(?<=[a-z][.!?])\\s+(?=[A-Z])") %>% 
+    filter(text != "") %>% 
+    # numerate sentences within rows
+    group_by(section) %>% 
+    mutate(sentence_nr = row_number()) %>% 
+    ungroup() %>% 
+    mutate(
+      doc_id = gsub(".+/([a-z_]+)_(\\d{4})\\.[a-z]+$", "\\1_\\2", file.path)
+      , country = stringr::str_to_title(gsub("_", " ", sub("( \\d{4})$", "", doc_id)))
+      , data_year = stringr::str_to_title(sub(".+(\\d{4})$", "\\1", doc_id))
+    ) %>% 
+    select(
+      doc_id
+      , section_nr
+      , section
+      , paragraph_nr
+      , sentence_nr
+      , sentence = text
+      , country
+      , data_year
+    )
+}) %>% 
   mutate_at(vars(data_year), as.integer)
-
 
 write_rds(pdy_article_content, file.path("data", "political_data_yearbooks.RData"))
 
