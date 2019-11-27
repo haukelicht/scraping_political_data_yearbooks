@@ -235,11 +235,9 @@ pdy_articles <- pdy_country_article_links %>%
     }
   )
 
-
-
-pdy_articles
-
 write_rds(pdy_articles, file.path("data", "pdy_articles.RData"))
+
+write_csv(pdy_articles[-4], file.path("data", "pdy_articles.csv"))
 
 
 pdy_article_content <- list.files("webdata", full.names = T, pattern = "*.html") %>% 
@@ -300,3 +298,5 @@ pdy_article_content <- list.files("webdata", full.names = T, pattern = "*.html")
 
 
 write_rds(pdy_article_content, file.path("data", "political_data_yearbooks.RData"))
+
+write_csv(pdy_article_content, file.path("data", "political_data_yearbooks.csv"))
