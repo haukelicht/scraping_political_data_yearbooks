@@ -1,4 +1,4 @@
-# Scraping political yearbooks
+# Scraping political data yearbooks
 
 Scripts to scrape [ECPR Political Data Yearbook reports](https://ejpr.onlinelibrary.wiley.com/journal/20478852).
 
